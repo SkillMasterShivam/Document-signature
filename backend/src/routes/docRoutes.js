@@ -1,5 +1,5 @@
 import express from 'express';
-import { uploadDocument } from '../controllers/docController.js';
+import { uploadDocument, getUserDocuments } from '../controllers/docController.js';
 import authMiddleware from '../middlewares/authMiddleware.js';
 import upload from '../middlewares/uploadMiddleware.js';
 
@@ -17,5 +17,7 @@ const handleUpload = (req, res, next) => {
 };
 
 router.post('/upload', authMiddleware, handleUpload, uploadDocument);
+router.get('/', authMiddleware, getUserDocuments);
 
 export default router;
+

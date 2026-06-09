@@ -65,3 +65,40 @@ export const uploadDocument = async (req, res) => {
     });
   }
 };
+
+// @desc    Get all documents for the authenticated user
+// @route   GET /api/docs
+// @access  Private
+export const getUserDocuments = async (req, res) => {
+  try {
+    const userId = req.user._id.toString();
+
+    if (isDbConnected()) {
+      const documents = await Document.find({ uploadedBy: userId }).sort({ createdAt: -1 });
+
+      return res.status(200).json({
+        success: true,
+        documents,
+      });
+    } else {
+      // Mock / In-memory fallback
+      console.log('[Mock Mode] Fetching documents for user:', userId);
+      
+      const userDocs = mockDocuments
+        .filter((doc) => doc.uploadedBy.toString() === userId)
+        .sort((a, b) => b.createdAt - a.createdAt);
+
+      return res.status(200).json({
+        success: true,
+        documents: userDocs,
+      });
+    }
+  } catch (error) {
+    console.error('Fetch Documents Error:', error);
+    return res.status(500).json({
+      success: false,
+      message: error.message || 'Failed to fetch documents',
+    });
+  }
+};
+
