@@ -5,6 +5,7 @@ import path from "path";
 import healthRoutes from "./routes/healthRoutes.js";
 import authRoutes from "./routes/authRoutes.js";
 import docRoutes from "./routes/docRoutes.js";
+import signatureRoutes from "./routes/signatureRoutes.js";
 
 const app = express();
 
@@ -19,6 +20,7 @@ app.use("/uploads", express.static(uploadDir));
 app.use("/api/health", healthRoutes);
 app.use("/api/auth", authRoutes);
 app.use("/api/docs", docRoutes);
+app.use("/api/signatures", signatureRoutes);
 
 export default app;
 

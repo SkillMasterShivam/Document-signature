@@ -18,6 +18,15 @@ interface DocMetadata {
   createdAt: string;
 }
 
+interface Signature {
+  _id: string;
+  fileId: string;
+  x: number;
+  y: number;
+  page: number;
+  status?: string;
+}
+
 const Dashboard = () => {
   const [documents, setDocuments] = useState<DocMetadata[]>([]);
   const [loading, setLoading] = useState(true);
@@ -28,10 +37,19 @@ const Dashboard = () => {
   const [numPages, setNumPages] = useState<number>(0);
   const [pageNumber, setPageNumber] = useState<number>(1);
   const [previewError, setPreviewError] = useState<string | null>(null);
+  const [signatures, setSignatures] = useState<Signature[]>([]);
 
   useEffect(() => {
     fetchDocuments();
   }, []);
+
+  useEffect(() => {
+    if (selectedDoc) {
+      fetchSignatures(selectedDoc._id);
+    } else {
+      setSignatures([]);
+    }
+  }, [selectedDoc]);
 
   const fetchDocuments = async () => {
     try {
@@ -52,6 +70,52 @@ const Dashboard = () => {
       setError('API failure: Could not connect to the server');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const fetchSignatures = async (documentId: string) => {
+    try {
+      const token = localStorage.getItem('token') || '';
+      const res = await fetch(`http://localhost:5000/api/signatures/${documentId}`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      const data = await res.json();
+      if (data.success) {
+        setSignatures(data.signatures);
+      }
+    } catch (err) {
+      console.error('Failed to fetch signatures', err);
+    }
+  };
+
+  const handlePdfClick = async (e: React.MouseEvent<HTMLDivElement>) => {
+    if (!selectedDoc) return;
+    
+    const rect = e.currentTarget.getBoundingClientRect();
+    const x = ((e.clientX - rect.left) / rect.width) * 100;
+    const y = ((e.clientY - rect.top) / rect.height) * 100;
+
+    try {
+      const token = localStorage.getItem('token') || '';
+      const res = await fetch('http://localhost:5000/api/signatures', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          fileId: selectedDoc._id,
+          x,
+          y,
+          page: pageNumber
+        })
+      });
+      const data = await res.json();
+      if (data.success) {
+        setSignatures(prev => [...prev, data.signature]);
+      }
+    } catch (err) {
+      console.error('Failed to save signature', err);
     }
   };
 
@@ -149,13 +213,30 @@ const Dashboard = () => {
                   onLoadError={onDocumentLoadError}
                   loading={<div className="p-8 text-gray-600 font-medium">Loading PDF document...</div>}
                 >
-                  <Page 
-                    pageNumber={pageNumber} 
-                    renderTextLayer={false}
-                    renderAnnotationLayer={false}
-                    className="shadow-lg border border-gray-300"
-                    width={Math.min(window.innerWidth * 0.8, 800)}
-                  />
+                  <div className="relative inline-block cursor-crosshair shadow-lg border border-gray-300" onClick={handlePdfClick}>
+                    <Page 
+                      pageNumber={pageNumber} 
+                      renderTextLayer={false}
+                      renderAnnotationLayer={false}
+                      width={Math.min(window.innerWidth * 0.8, 800)}
+                    />
+                    {signatures
+                      .filter(sig => sig.page === pageNumber)
+                      .map(sig => (
+                        <div 
+                          key={sig._id}
+                          className="absolute border-2 border-dashed border-blue-600 bg-blue-100/50 flex items-center justify-center text-blue-800 font-bold px-4 py-2 pointer-events-none rounded"
+                          style={{
+                            left: `${sig.x}%`,
+                            top: `${sig.y}%`,
+                            transform: 'translate(-50%, -50%)',
+                            minWidth: '100px'
+                          }}
+                        >
+                          Sign Here
+                        </div>
+                      ))}
+                  </div>
                 </Document>
               )}
             </div>
