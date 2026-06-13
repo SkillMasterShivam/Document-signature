@@ -12,7 +12,7 @@ const isDbConnected = () => mongoose.connection.readyState === 1;
 // @access  Private
 export const saveSignatureCoordinates = async (req, res) => {
   try {
-    const { fileId, x, y, page } = req.body;
+    const { fileId, x, y, page, id } = req.body;
 
     if (!fileId || x === undefined || y === undefined || page === undefined) {
       return res.status(400).json({
@@ -31,6 +31,21 @@ export const saveSignatureCoordinates = async (req, res) => {
           success: false,
           message: "Document not found",
         });
+      }
+
+      if (id) {
+        // Update existing
+        const existingSignature = await Signature.findById(id);
+        if (existingSignature && existingSignature.signer.toString() === userId) {
+          existingSignature.x = x;
+          existingSignature.y = y;
+          existingSignature.page = page;
+          await existingSignature.save();
+          return res.status(200).json({
+            success: true,
+            signature: existingSignature,
+          });
+        }
       }
 
       const newSignature = await Signature.create({
@@ -56,6 +71,20 @@ export const saveSignatureCoordinates = async (req, res) => {
           success: false,
           message: "Document not found (Mock)",
         });
+      }
+
+      if (id) {
+        const existingSigIndex = mockSignatures.findIndex((sig) => sig._id === id && sig.signer === userId);
+        if (existingSigIndex !== -1) {
+          mockSignatures[existingSigIndex].x = x;
+          mockSignatures[existingSigIndex].y = y;
+          mockSignatures[existingSigIndex].page = page;
+          mockSignatures[existingSigIndex].updatedAt = new Date();
+          return res.status(200).json({
+            success: true,
+            signature: mockSignatures[existingSigIndex],
+          });
+        }
       }
 
       const mockSig = {
