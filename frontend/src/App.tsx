@@ -7,6 +7,7 @@ import { Routes, Route, Link } from 'react-router-dom'
 import Dashboard from './Dashboard'
 import Login from './Login'
 import Register from './Register'
+import PublicSign from './PublicSign'
 
 function Home() {
   const [count, setCount] = useState(0)
@@ -48,6 +49,7 @@ function App() {
       <Route path="/login" element={<Login />} />
       <Route path="/register" element={<Register />} />
       <Route path="/dashboard" element={<Dashboard />} />
+      <Route path="/sign/:token" element={<PublicSign />} />
     </Routes>
   )
 }

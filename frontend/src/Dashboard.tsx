@@ -237,6 +237,30 @@ const Dashboard = () => {
     }
   };
 
+  const handleInvite = async (documentId: string, email: string) => {
+    if (!email) return;
+    try {
+      const token = localStorage.getItem('token') || '';
+      const res = await fetch('http://localhost:5000/api/signatures/send', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`
+        },
+        body: JSON.stringify({ documentId, email })
+      });
+      const data = await res.json();
+      if (data.success) {
+        alert('Invitation sent successfully!');
+      } else {
+        alert(data.message || 'Failed to send invitation');
+      }
+    } catch (err) {
+      console.error(err);
+      alert('Error sending invitation');
+    }
+  };
+
   const openPreview = (doc: DocMetadata) => {
     setSelectedDoc(doc);
     setPageNumber(1);
@@ -309,12 +333,37 @@ const Dashboard = () => {
                   </p>
                 </div>
               </div>
-              <button 
-                onClick={() => openPreview(doc)}
-                className="mt-5 w-full bg-blue-600 text-white py-2.5 px-4 rounded font-medium hover:bg-blue-700 transition-colors focus:ring-4 focus:ring-blue-200"
-              >
-                Preview PDF
-              </button>
+              <div className="mt-5 space-y-2">
+                <button 
+                  onClick={() => openPreview(doc)}
+                  className="w-full bg-blue-600 text-white py-2.5 px-4 rounded font-medium hover:bg-blue-700 transition-colors focus:ring-4 focus:ring-blue-200"
+                >
+                  Preview PDF
+                </button>
+                <div className="flex gap-2">
+                  <input 
+                    type="email" 
+                    placeholder="Signer email" 
+                    className="flex-1 border p-2 rounded text-sm outline-none focus:ring-2 focus:ring-blue-500"
+                    onKeyDown={(e) => {
+                      if(e.key === 'Enter') {
+                        handleInvite(doc._id, e.currentTarget.value);
+                        e.currentTarget.value = '';
+                      }
+                    }}
+                  />
+                  <button 
+                    onClick={(e) => {
+                      const input = e.currentTarget.previousElementSibling as HTMLInputElement;
+                      handleInvite(doc._id, input.value);
+                      input.value = '';
+                    }}
+                    className="bg-gray-800 text-white px-3 rounded text-sm hover:bg-gray-900 transition-colors"
+                  >
+                    Invite
+                  </button>
+                </div>
+              </div>
             </div>
           ))}
         </div>
