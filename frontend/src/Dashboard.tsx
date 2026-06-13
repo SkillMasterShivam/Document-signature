@@ -40,6 +40,8 @@ const Dashboard = () => {
   const [signatures, setSignatures] = useState<Signature[]>([]);
   const [draggingSigId, setDraggingSigId] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
+  const [finalizing, setFinalizing] = useState(false);
+  const [signedPdfUrl, setSignedPdfUrl] = useState<string | null>(null);
 
   useEffect(() => {
     fetchDocuments();
@@ -208,14 +210,43 @@ const Dashboard = () => {
     }
   };
 
+  const handleFinalize = async () => {
+    if (!selectedDoc) return;
+    try {
+      setFinalizing(true);
+      const token = localStorage.getItem('token') || '';
+      const res = await fetch('http://localhost:5000/api/signatures/finalize', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`
+        },
+        body: JSON.stringify({ fileId: selectedDoc._id })
+      });
+      const data = await res.json();
+      if (data.success) {
+        setSignedPdfUrl(`http://localhost:5000${data.signedPdfPath}`);
+      } else {
+        alert(data.message || 'Failed to finalize');
+      }
+    } catch (err) {
+      console.error(err);
+      alert('Error finalizing document');
+    } finally {
+      setFinalizing(false);
+    }
+  };
+
   const openPreview = (doc: DocMetadata) => {
     setSelectedDoc(doc);
     setPageNumber(1);
     setPreviewError(null);
+    setSignedPdfUrl(null);
   };
 
   const closePreview = () => {
     setSelectedDoc(null);
+    setSignedPdfUrl(null);
   };
 
   const onDocumentLoadSuccess = ({ numPages }: { numPages: number }) => {
@@ -295,13 +326,28 @@ const Dashboard = () => {
             
             <div className="flex justify-between items-center p-4 border-b border-gray-200 bg-gray-50">
               <h2 className="font-semibold text-lg truncate pr-4 text-gray-800">{selectedDoc.originalName}</h2>
-              <button 
-                onClick={closePreview}
-                className="text-gray-500 hover:text-red-500 font-bold text-2xl px-2 leading-none"
-                aria-label="Close"
-              >
-                &times;
-              </button>
+              <div className="flex items-center gap-4">
+                {signedPdfUrl ? (
+                  <a href={signedPdfUrl} target="_blank" rel="noreferrer" className="text-green-600 font-bold underline text-sm">
+                    Download Signed PDF
+                  </a>
+                ) : (
+                  <button 
+                    onClick={handleFinalize} 
+                    disabled={finalizing || signatures.length === 0} 
+                    className="bg-blue-600 text-white px-4 py-1.5 rounded text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed hover:bg-blue-700"
+                  >
+                    {finalizing ? 'Finalizing...' : 'Finalize Document'}
+                  </button>
+                )}
+                <button 
+                  onClick={closePreview}
+                  className="text-gray-500 hover:text-red-500 font-bold text-2xl px-2 leading-none"
+                  aria-label="Close"
+                >
+                  &times;
+                </button>
+              </div>
             </div>
 
             <div className="flex-1 overflow-auto p-4 bg-gray-200 flex flex-col items-center justify-start min-h-[50vh]">

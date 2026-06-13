@@ -2,6 +2,9 @@ import mongoose from "mongoose";
 import Signature from "../models/Signature.js";
 import Document from "../models/Document.js";
 import { mockDocuments } from "./docController.js";
+import { PDFDocument, rgb, StandardFonts } from "pdf-lib";
+import fs from "fs/promises";
+import path from "path";
 
 export const mockSignatures = [];
 
@@ -148,3 +151,106 @@ export const getDocumentSignatures = async (req, res) => {
     });
   }
 };
+
+// @desc    Finalize and render signatures onto PDF
+// @route   POST /api/signatures/finalize
+// @access  Private
+export const finalizeDocument = async (req, res) => {
+  try {
+    const { fileId } = req.body;
+
+    if (!fileId) {
+      return res.status(400).json({
+        success: false,
+        message: "Missing document fileId",
+      });
+    }
+
+    const userId = req.user._id.toString();
+    const userName = req.user.name || "Signed";
+
+    let document;
+    let signatures = [];
+
+    if (isDbConnected()) {
+      document = await Document.findById(fileId);
+      if (!document) {
+        return res.status(404).json({ success: false, message: "Document not found" });
+      }
+      signatures = await Signature.find({ fileId, signer: userId });
+    } else {
+      document = mockDocuments.find(d => d._id === fileId);
+      if (!document) {
+        return res.status(404).json({ success: false, message: "Document not found (Mock)" });
+      }
+      signatures = mockSignatures.filter(s => s.fileId === fileId && s.signer === userId);
+    }
+
+    if (!signatures || signatures.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: "No signatures found for this document",
+      });
+    }
+
+    // 1. Load original PDF
+    const pdfBytes = await fs.readFile(document.filePath);
+    
+    // 4. Open PDF using PDF-Lib
+    const pdfDoc = await PDFDocument.load(pdfBytes);
+    const helveticaFont = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
+    
+    // 5. Render signature onto PDF page
+    const pages = pdfDoc.getPages();
+    for (const sig of signatures) {
+      const pageIndex = sig.page - 1;
+      if (pageIndex >= 0 && pageIndex < pages.length) {
+        const page = pages[pageIndex];
+        const { width, height } = page.getSize();
+        
+        // Calculate coordinate from percentage to points.
+        // Frontend uses Top-Left origin, pdf-lib uses Bottom-Left origin.
+        const pdfX = (sig.x / 100) * width;
+        const pdfY = height - ((sig.y / 100) * height);
+        
+        // Draw text representing the signature
+        page.drawText(userName, {
+          x: pdfX,
+          y: pdfY,
+          size: 16,
+          font: helveticaFont,
+          color: rgb(0, 0, 0.8),
+        });
+      }
+    }
+
+    // 6. Create new signed PDF
+    const signedPdfBytes = await pdfDoc.save();
+
+    // 7. Save signed PDF to disk
+    const signedDir = path.join(process.cwd(), "uploads", "signed");
+    await fs.mkdir(signedDir, { recursive: true });
+    
+    const signedFileName = `signed-${Date.now()}-${document.fileName}`;
+    const signedFilePath = path.join(signedDir, signedFileName);
+    
+    await fs.writeFile(signedFilePath, signedPdfBytes);
+
+    // 8. Return path or URL
+    const signedPdfUrl = `/uploads/signed/${signedFileName}`;
+
+    return res.status(200).json({
+      success: true,
+      signedPdfPath: signedPdfUrl,
+      documentId: document._id || document.id,
+    });
+
+  } catch (error) {
+    console.error("Finalize Signature Error:", error);
+    return res.status(500).json({
+      success: false,
+      message: error.message || "Failed to process and finalize PDF",
+    });
+  }
+};
+
