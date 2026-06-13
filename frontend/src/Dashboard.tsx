@@ -39,6 +39,7 @@ const Dashboard = () => {
   const [previewError, setPreviewError] = useState<string | null>(null);
   const [signatures, setSignatures] = useState<Signature[]>([]);
   const [draggingSigId, setDraggingSigId] = useState<string | null>(null);
+  const [uploading, setUploading] = useState(false);
 
   useEffect(() => {
     fetchDocuments();
@@ -71,6 +72,38 @@ const Dashboard = () => {
       setError('API failure: Could not connect to the server');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (!e.target.files || e.target.files.length === 0) return;
+    const file = e.target.files[0];
+    
+    const formData = new FormData();
+    formData.append('file', file);
+    
+    try {
+      setUploading(true);
+      const token = localStorage.getItem('token') || '';
+      const res = await fetch('http://localhost:5000/api/docs/upload', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${token}`
+        },
+        body: formData
+      });
+      const data = await res.json();
+      if (data.success) {
+        fetchDocuments(); // Refresh list
+      } else {
+        alert(data.message || 'Upload failed');
+      }
+    } catch (err) {
+      console.error('Upload error', err);
+      alert('Upload failed');
+    } finally {
+      setUploading(false);
+      e.target.value = ''; // Reset input
     }
   };
 
@@ -208,7 +241,21 @@ const Dashboard = () => {
 
   return (
     <div className="p-8 max-w-6xl mx-auto">
-      <h1 className="text-3xl font-bold mb-8 text-gray-800">My Documents Dashboard</h1>
+      <div className="flex justify-between items-center mb-8">
+        <h1 className="text-3xl font-bold text-gray-800">My Documents Dashboard</h1>
+        <div>
+          <label className="bg-green-600 text-white px-4 py-2 rounded font-medium hover:bg-green-700 cursor-pointer shadow-sm">
+            {uploading ? 'Uploading...' : 'Upload PDF'}
+            <input 
+              type="file" 
+              accept="application/pdf" 
+              onChange={handleFileUpload} 
+              disabled={uploading}
+              className="hidden" 
+            />
+          </label>
+        </div>
+      </div>
       
       {documents.length === 0 ? (
         <div className="text-center p-12 bg-gray-50 rounded-lg border border-gray-200">
