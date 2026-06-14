@@ -374,3 +374,39 @@ export const getPublicDocument = async (req, res) => {
   }
 };
 
+// @desc    Complete public signing
+// @route   POST /api/signatures/public/:token/sign
+// @access  Public
+export const publicSignDocument = async (req, res) => {
+  try {
+    const { token } = req.params;
+    let invitation;
+
+    if (isDbConnected()) {
+      invitation = await Invitation.findOne({ token, status: "pending" });
+      if (!invitation || invitation.expirationDate < new Date()) {
+        return res.status(400).json({ success: false, message: "Invalid or expired token" });
+      }
+      invitation.status = "signed";
+      await invitation.save();
+    } else {
+      invitation = mockInvitations.find(i => i.token === token && i.status === "pending");
+      if (!invitation || invitation.expirationDate < new Date()) {
+        return res.status(400).json({ success: false, message: "Invalid or expired token (Mock)" });
+      }
+      invitation.status = "signed";
+    }
+
+    // Usually we would map the signature logic here using pdf-lib, but for this demo 
+    // we simply acknowledge the signature logic passed successfully for the audit log.
+    return res.status(200).json({
+      success: true,
+      message: "Signed successfully",
+      invitation
+    });
+  } catch (error) {
+    console.error("Public Sign Error:", error);
+    return res.status(500).json({ success: false, message: "Failed to complete signing" });
+  }
+};
+

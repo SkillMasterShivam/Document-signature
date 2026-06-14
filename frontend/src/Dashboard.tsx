@@ -42,6 +42,8 @@ const Dashboard = () => {
   const [uploading, setUploading] = useState(false);
   const [finalizing, setFinalizing] = useState(false);
   const [signedPdfUrl, setSignedPdfUrl] = useState<string | null>(null);
+  const [auditLogs, setAuditLogs] = useState<any[]>([]);
+  const [showAudit, setShowAudit] = useState(false);
 
   useEffect(() => {
     fetchDocuments();
@@ -261,11 +263,28 @@ const Dashboard = () => {
     }
   };
 
+  const fetchAuditLogs = async (documentId: string) => {
+    try {
+      const token = localStorage.getItem('token') || '';
+      const res = await fetch(`http://localhost:5000/api/audit/${documentId}`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      const data = await res.json();
+      if (data.success) {
+        setAuditLogs(data.auditLogs);
+      }
+    } catch (err) {
+      console.error('Failed to fetch audit logs', err);
+    }
+  };
+
   const openPreview = (doc: DocMetadata) => {
     setSelectedDoc(doc);
     setPageNumber(1);
     setPreviewError(null);
     setSignedPdfUrl(null);
+    setShowAudit(false);
+    fetchAuditLogs(doc._id);
   };
 
   const closePreview = () => {
@@ -376,6 +395,12 @@ const Dashboard = () => {
             <div className="flex justify-between items-center p-4 border-b border-gray-200 bg-gray-50">
               <h2 className="font-semibold text-lg truncate pr-4 text-gray-800">{selectedDoc.originalName}</h2>
               <div className="flex items-center gap-4">
+                <button 
+                  onClick={() => setShowAudit(!showAudit)}
+                  className="bg-gray-100 hover:bg-gray-200 border border-gray-300 text-gray-800 px-4 py-1.5 rounded text-sm font-medium transition-colors"
+                >
+                  {showAudit ? 'Back to PDF' : 'Audit Trail'}
+                </button>
                 {signedPdfUrl ? (
                   <a href={signedPdfUrl} target="_blank" rel="noreferrer" className="text-green-600 font-bold underline text-sm">
                     Download Signed PDF
@@ -400,7 +425,39 @@ const Dashboard = () => {
             </div>
 
             <div className="flex-1 overflow-auto p-4 bg-gray-200 flex flex-col items-center justify-start min-h-[50vh]">
-              {previewError ? (
+              {showAudit ? (
+                <div className="w-full max-w-4xl bg-white p-6 rounded shadow-sm">
+                  <h3 className="text-xl font-bold mb-4 text-gray-800">Audit Trail</h3>
+                  {auditLogs.length === 0 ? (
+                    <p className="text-gray-500">No audit history found.</p>
+                  ) : (
+                    <div className="overflow-x-auto">
+                      <table className="min-w-full text-left text-sm text-gray-700">
+                        <thead className="bg-gray-100 font-semibold text-gray-800 border-b border-gray-200">
+                          <tr>
+                            <th className="px-4 py-3 border-b">Action</th>
+                            <th className="px-4 py-3 border-b">User / Email</th>
+                            <th className="px-4 py-3 border-b">Date & Time</th>
+                            <th className="px-4 py-3 border-b">IP Address</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {auditLogs.map((log, idx) => (
+                            <tr key={log._id || idx} className="border-b border-gray-100 hover:bg-gray-50">
+                              <td className="px-4 py-3 font-medium text-gray-800">{log.action}</td>
+                              <td className="px-4 py-3">
+                                {log.userId?.name || log.userId?.email || log.signerEmail || 'Unknown'}
+                              </td>
+                              <td className="px-4 py-3">{new Date(log.createdAt).toLocaleString()}</td>
+                              <td className="px-4 py-3 font-mono text-xs text-gray-500">{log.ipAddress}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
+              ) : previewError ? (
                 <div className="text-red-500 text-center p-8 font-medium bg-white rounded shadow-sm mt-8">
                   {previewError}
                 </div>
@@ -447,7 +504,7 @@ const Dashboard = () => {
               )}
             </div>
 
-            {!previewError && numPages > 0 && (
+            {!previewError && !showAudit && numPages > 0 && (
               <div className="p-4 border-t border-gray-200 bg-gray-50 flex items-center justify-between">
                 <button 
                   disabled={pageNumber <= 1} 

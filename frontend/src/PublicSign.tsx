@@ -40,10 +40,20 @@ const PublicSign = () => {
     if (token) fetchPublicDoc();
   }, [token]);
 
-  const handleSign = () => {
-    // In a real flow, this would save the signature coordinates or finalize the PDF.
-    // For Day 9 scope, we allow the signing action and show success.
-    setSigned(true);
+  const handleSign = async () => {
+    try {
+      const res = await fetch(`http://localhost:5000/api/signatures/public/${token}/sign`, {
+        method: 'POST'
+      });
+      const data = await res.json();
+      if (data.success) {
+        setSigned(true);
+      } else {
+        alert(data.message || 'Failed to sign.');
+      }
+    } catch (err) {
+      alert('Network error while signing.');
+    }
   };
 
   if (loading) return <div className="p-8 text-center text-xl text-gray-600">Verifying secure link...</div>;
