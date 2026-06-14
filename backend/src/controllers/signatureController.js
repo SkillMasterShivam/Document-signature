@@ -60,7 +60,7 @@ export const saveSignatureCoordinates = async (req, res) => {
         x,
         y,
         page,
-        status: "pending",
+        status: "Pending",
       });
 
       return res.status(201).json({
@@ -100,7 +100,7 @@ export const saveSignatureCoordinates = async (req, res) => {
         x,
         y,
         page,
-        status: "pending",
+        status: "Pending",
         createdAt: new Date(),
         updatedAt: new Date(),
       };
@@ -407,6 +407,73 @@ export const publicSignDocument = async (req, res) => {
   } catch (error) {
     console.error("Public Sign Error:", error);
     return res.status(500).json({ success: false, message: "Failed to complete signing" });
+  }
+};
+
+// @desc    Update signature status (Accept/Reject)
+// @route   PATCH /api/signatures/:id/status
+// @access  Private
+export const updateSignatureStatus = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { status, reason } = req.body;
+    const userId = req.user._id.toString();
+
+    if (!status || !["Signed", "Rejected"].includes(status)) {
+      return res.status(400).json({ success: false, message: "Invalid status" });
+    }
+
+    if (status === "Rejected" && !reason) {
+      return res.status(400).json({ success: false, message: "Missing rejection reason when rejected" });
+    }
+
+    if (isDbConnected()) {
+      const signature = await Signature.findById(id);
+      if (!signature) {
+        return res.status(404).json({ success: false, message: "Signature not found" });
+      }
+
+      if (signature.signer.toString() !== userId) {
+        return res.status(403).json({ success: false, message: "Unauthorized user" });
+      }
+
+      if (signature.status !== "Pending") {
+        return res.status(400).json({ success: false, message: "Already finalized signatures cannot be updated" });
+      }
+
+      signature.status = status;
+      if (status === "Signed") signature.signedAt = new Date();
+      if (status === "Rejected") signature.rejectionReason = reason;
+
+      await signature.save();
+
+      return res.status(200).json({ success: true, signature });
+    } else {
+      // Mock / In-memory fallback
+      const sigIndex = mockSignatures.findIndex((sig) => sig._id === id);
+      if (sigIndex === -1) {
+        return res.status(404).json({ success: false, message: "Signature not found (Mock)" });
+      }
+
+      const signature = mockSignatures[sigIndex];
+      if (signature.signer !== userId) {
+        return res.status(403).json({ success: false, message: "Unauthorized user (Mock)" });
+      }
+
+      if (signature.status !== "Pending" && signature.status !== "pending") {
+        return res.status(400).json({ success: false, message: "Already finalized signatures cannot be updated (Mock)" });
+      }
+
+      signature.status = status;
+      if (status === "Signed") signature.signedAt = new Date();
+      if (status === "Rejected") signature.rejectionReason = reason;
+      signature.updatedAt = new Date();
+
+      return res.status(200).json({ success: true, signature });
+    }
+  } catch (error) {
+    console.error("Update Status Error:", error);
+    return res.status(500).json({ success: false, message: "Failed to update signature status" });
   }
 };
 

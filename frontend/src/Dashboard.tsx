@@ -25,6 +25,8 @@ interface Signature {
   y: number;
   page: number;
   status?: string;
+  rejectionReason?: string;
+  signedAt?: string;
 }
 
 const Dashboard = () => {
@@ -44,6 +46,9 @@ const Dashboard = () => {
   const [signedPdfUrl, setSignedPdfUrl] = useState<string | null>(null);
   const [auditLogs, setAuditLogs] = useState<any[]>([]);
   const [showAudit, setShowAudit] = useState(false);
+  
+  const [rejectingSigId, setRejectingSigId] = useState<string | null>(null);
+  const [rejectReason, setRejectReason] = useState('');
 
   useEffect(() => {
     fetchDocuments();
@@ -236,6 +241,36 @@ const Dashboard = () => {
       alert('Error finalizing document');
     } finally {
       setFinalizing(false);
+    }
+  };
+
+  const handleStatusUpdate = async (sigId: string, status: string) => {
+    if (status === 'Rejected' && (!rejectReason || rejectReason.trim() === '')) {
+      alert("Please enter a rejection reason.");
+      return;
+    }
+
+    try {
+      const token = localStorage.getItem('token') || '';
+      const res = await fetch(`http://localhost:5000/api/signatures/${sigId}/status`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`
+        },
+        body: JSON.stringify({ status, reason: status === 'Rejected' ? rejectReason : undefined })
+      });
+      const data = await res.json();
+      if (data.success) {
+        setSignatures(prev => prev.map(s => s._id === sigId ? data.signature : s));
+        setRejectingSigId(null);
+        setRejectReason('');
+      } else {
+        alert(data.message || "Failed to update status");
+      }
+    } catch (err) {
+      console.error(err);
+      alert("Error updating status");
     }
   };
 
@@ -477,28 +512,75 @@ const Dashboard = () => {
                     />
                     {signatures
                       .filter(sig => sig.page === pageNumber)
-                      .map(sig => (
+                      .map(sig => {
+                        const isPending = sig.status === 'Pending' || !sig.status;
+                        const isSigned = sig.status === 'Signed';
+                        const isRejected = sig.status === 'Rejected';
+                        
+                        return (
                         <div 
                           key={sig._id}
-                          onPointerDown={(e) => handlePointerDown(e, sig._id)}
-                          onPointerMove={handlePointerMove}
-                          onPointerUp={handlePointerUp}
-                          className={`absolute border-2 border-dashed flex items-center justify-center font-bold px-4 py-2 rounded select-none ${
-                            draggingSigId === sig._id 
-                              ? 'border-blue-800 bg-blue-200/70 text-blue-900 cursor-grabbing z-50 shadow-xl scale-105 transition-transform' 
-                              : 'border-blue-600 bg-blue-100/50 text-blue-800 cursor-grab hover:bg-blue-200/60 z-40 transition-colors'
-                          }`}
+                          className={`absolute flex flex-col items-center justify-center rounded select-none z-40`}
                           style={{
                             left: `${sig.x}%`,
                             top: `${sig.y}%`,
                             transform: draggingSigId === sig._id ? 'translate(-50%, -50%) scale(1.05)' : 'translate(-50%, -50%)',
-                            minWidth: '100px',
+                            minWidth: '150px',
                             touchAction: 'none'
                           }}
                         >
-                          Sign Here
+                          <div 
+                            className={`border-2 border-dashed flex items-center justify-center font-bold px-4 py-2 rounded w-full transition-colors shadow-sm ${
+                              isSigned ? 'border-green-600 bg-green-100 text-green-800' :
+                              isRejected ? 'border-red-600 bg-red-100 text-red-800' :
+                              draggingSigId === sig._id ? 'border-blue-800 bg-blue-200/70 text-blue-900 cursor-grabbing z-50 shadow-xl' :
+                              'border-blue-600 bg-blue-100/50 text-blue-800 cursor-grab hover:bg-blue-200/60'
+                            }`}
+                            onPointerDown={isPending ? (e) => handlePointerDown(e, sig._id) : undefined}
+                            onPointerMove={isPending ? handlePointerMove : undefined}
+                            onPointerUp={isPending ? handlePointerUp : undefined}
+                          >
+                            {isSigned ? 'Signed' : isRejected ? 'Rejected' : 'Sign Here'}
+                          </div>
+
+                          {isPending && (
+                            <div className="mt-2 bg-white border border-gray-200 shadow-lg p-2 rounded z-50 text-sm w-full" onPointerDown={e => e.stopPropagation()}>
+                              {rejectingSigId === sig._id ? (
+                                <div className="flex flex-col gap-2">
+                                  <textarea 
+                                    className="border rounded p-1 w-full text-xs outline-none focus:border-blue-500" 
+                                    placeholder="Reason..." 
+                                    value={rejectReason}
+                                    onChange={e => setRejectReason(e.target.value)}
+                                    autoFocus
+                                  />
+                                  <div className="flex justify-between gap-1">
+                                    <button onClick={() => setRejectingSigId(null)} className="px-2 py-1 bg-gray-200 hover:bg-gray-300 text-gray-700 rounded text-xs flex-1 transition-colors">Cancel</button>
+                                    <button onClick={() => handleStatusUpdate(sig._id, 'Rejected')} className="px-2 py-1 bg-red-600 hover:bg-red-700 text-white rounded text-xs flex-1 transition-colors">Confirm</button>
+                                  </div>
+                                </div>
+                              ) : (
+                                <div className="flex justify-between gap-2">
+                                  <button onClick={() => handleStatusUpdate(sig._id, 'Signed')} className="px-2 py-1 bg-green-600 hover:bg-green-700 text-white rounded font-medium flex-1 transition-colors">Accept</button>
+                                  <button onClick={() => setRejectingSigId(sig._id)} className="px-2 py-1 bg-red-600 hover:bg-red-700 text-white rounded font-medium flex-1 transition-colors">Reject</button>
+                                </div>
+                              )}
+                            </div>
+                          )}
+
+                          {isRejected && sig.rejectionReason && (
+                            <div className="mt-1 text-xs text-red-600 font-medium bg-white p-1 rounded shadow-sm border border-red-100 max-w-[200px] text-center">
+                              Reason: {sig.rejectionReason}
+                            </div>
+                          )}
+
+                          {isSigned && sig.signedAt && (
+                            <div className="mt-1 text-xs text-green-600 font-medium bg-white p-1 rounded shadow-sm border border-green-100">
+                              {new Date(sig.signedAt).toLocaleDateString()}
+                            </div>
+                          )}
                         </div>
-                      ))}
+                      )})}
                   </div>
                 </Document>
               )}
