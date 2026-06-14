@@ -1,5 +1,5 @@
 import express from 'express';
-import { uploadDocument, getUserDocuments } from '../controllers/docController.js';
+import { uploadDocument, getUserDocuments, deleteDocument } from '../controllers/docController.js';
 import authMiddleware from '../middlewares/authMiddleware.js';
 import upload from '../middlewares/uploadMiddleware.js';
 import { auditLog } from '../middlewares/auditMiddleware.js';
@@ -19,6 +19,7 @@ const handleUpload = (req, res, next) => {
 
 router.post('/upload', authMiddleware, handleUpload, auditLog('Document uploaded'), uploadDocument);
 router.get('/', authMiddleware, getUserDocuments);
+router.delete('/:id', authMiddleware, auditLog('Document deleted'), deleteDocument);
 
 export default router;
 

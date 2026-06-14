@@ -6,7 +6,7 @@ import {
   FileText, LayoutDashboard, Settings, FileSignature, Shield, 
   Download, Upload, X, Search as SearchIcon, Filter, 
   Loader2, LogOut, CheckCircle2, AlertCircle, ChevronLeft, ChevronRight,
-  Send, MoreVertical, Clock, FileWarning
+  Send, MoreVertical, Clock, FileWarning, Trash2
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import 'react-pdf/dist/Page/AnnotationLayer.css';
@@ -35,6 +35,10 @@ interface Signature {
   status?: string;
   rejectionReason?: string;
   signedAt?: string;
+  isUnsaved?: boolean;
+  isModified?: boolean;
+  originalX?: number;
+  originalY?: number;
 }
 
 const StatusBadge = ({ status }: { status?: string }) => {
@@ -81,6 +85,14 @@ const Dashboard = () => {
   
   const [signatures, setSignatures] = useState<Signature[]>([]);
   const [draggingSigId, setDraggingSigId] = useState<string | null>(null);
+  
+  const [isPlacementMode, setIsPlacementMode] = useState(false);
+  const [selectedSigId, setSelectedSigId] = useState<string | null>(null);
+  const [deletedSignature, setDeletedSignature] = useState<Signature | null>(null);
+
+  const [docToDelete, setDocToDelete] = useState<DocMetadata | null>(null);
+  const [deletingDoc, setDeletingDoc] = useState(false);
+
   const [uploading, setUploading] = useState(false);
   const [finalizing, setFinalizing] = useState(false);
   const [signedPdfUrl, setSignedPdfUrl] = useState<string | null>(null);
@@ -185,6 +197,45 @@ const Dashboard = () => {
     }
   };
 
+  const confirmDeleteDocument = async () => {
+    if (!docToDelete) return;
+    
+    try {
+      setDeletingDoc(true);
+      const toastId = toast.loading('Deleting document...', { id: 'delete_doc' });
+      const token = localStorage.getItem('token') || '';
+      
+      const res = await fetch(`http://localhost:5000/api/docs/${docToDelete._id}`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      
+      const data = await res.json();
+      
+      if (data.success) {
+        toast.success('Document deleted successfully', { id: 'delete_doc' });
+        
+        // Remove from local state
+        setDocuments(prev => prev.filter(d => d._id !== docToDelete._id));
+        setStats(prev => ({ ...prev, total: prev.total - 1 })); // Approximate stats update
+        
+        // Refresh completely to be safe
+        fetchDocuments();
+        
+        if (selectedDoc?._id === docToDelete._id) {
+          closePreview();
+        }
+      } else {
+        toast.error(data.message || 'Failed to delete document', { id: 'delete_doc' });
+      }
+    } catch (err) {
+      toast.error('Network error. Failed to delete document.', { id: 'delete_doc' });
+    } finally {
+      setDeletingDoc(false);
+      setDocToDelete(null);
+    }
+  };
+
   const fetchSignatures = async (documentId: string) => {
     try {
       const token = localStorage.getItem('token') || '';
@@ -203,35 +254,43 @@ const Dashboard = () => {
   const handlePdfClick = async (e: React.MouseEvent<HTMLDivElement>) => {
     if (!selectedDoc || draggingSigId) return;
     
+    if (!isPlacementMode) return;
+
+    const existingSig = signatures.find(s => s.page === pageNumber && (s.status === 'Pending' || !s.status));
+    if (existingSig) {
+      setSelectedSigId(existingSig._id);
+      setIsPlacementMode(false);
+      return;
+    }
+
     const rect = e.currentTarget.getBoundingClientRect();
     const x = ((e.clientX - rect.left) / rect.width) * 100;
     const y = ((e.clientY - rect.top) / rect.height) * 100;
 
-    const toastId = toast.loading('Adding signature field...');
-    try {
-      const token = localStorage.getItem('token') || '';
-      const res = await fetch('http://localhost:5000/api/signatures', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ fileId: selectedDoc._id, x, y, page: pageNumber })
-      });
-      const data = await res.json();
-      if (data.success) {
-        setSignatures(prev => [...prev, data.signature]);
-        fetchSignaturesForAllDocs(documents);
-        toast.success('Field added', { id: toastId });
-      } else {
-        toast.error('Failed to add field', { id: toastId });
-      }
-    } catch (err) {
-      toast.error('Network error', { id: toastId });
-    }
+    const newSig: Signature = {
+      _id: `temp-${Date.now()}`,
+      fileId: selectedDoc._id,
+      x,
+      y,
+      page: pageNumber,
+      status: 'Pending',
+      isUnsaved: true
+    };
+
+    setSignatures(prev => [...prev, newSig]);
+    setSelectedSigId(newSig._id);
+    setIsPlacementMode(false);
   };
 
-  const handlePointerDown = (e: React.PointerEvent<HTMLDivElement>, sigId: string) => {
+  const handlePointerDown = (e: React.PointerEvent<HTMLDivElement>, sig: Signature) => {
     e.stopPropagation();
     e.currentTarget.setPointerCapture(e.pointerId);
-    setDraggingSigId(sigId);
+    setDraggingSigId(sig._id);
+    setSelectedSigId(sig._id);
+    
+    if (!sig.isUnsaved && !sig.isModified) {
+      setSignatures(prev => prev.map(s => s._id === sig._id ? { ...s, isModified: true, originalX: s.x, originalY: s.y } : s));
+    }
   };
 
   const handlePointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
@@ -251,20 +310,44 @@ const Dashboard = () => {
   const handlePointerUp = async (e: React.PointerEvent<HTMLDivElement>) => {
     if (!draggingSigId) return;
     e.currentTarget.releasePointerCapture(e.pointerId);
-    
-    const movedSig = signatures.find(s => s._id === draggingSigId);
     setDraggingSigId(null);
+  };
+
+  const handleDelete = async () => {
+    if (!selectedSigId) return;
+    if (!window.confirm("Are you sure you want to delete this signature?")) return;
     
-    if (movedSig) {
+    const sigToDelete = signatures.find(s => s._id === selectedSigId);
+    if (!sigToDelete) return;
+    
+    if (!sigToDelete.isUnsaved) {
+      const token = localStorage.getItem('token') || '';
       try {
-        const token = localStorage.getItem('token') || '';
-        await fetch('http://localhost:5000/api/signatures', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-          body: JSON.stringify({ id: movedSig._id, fileId: movedSig.fileId, x: movedSig.x, y: movedSig.y, page: movedSig.page })
+        await fetch(`http://localhost:5000/api/signatures/${sigToDelete._id}`, {
+          method: 'DELETE',
+          headers: { Authorization: `Bearer ${token}` }
         });
-      } catch (err) {}
+      } catch(e) {}
     }
+    
+    setDeletedSignature(sigToDelete);
+    setSignatures(prev => prev.filter(s => s._id !== selectedSigId));
+    setSelectedSigId(null);
+  };
+
+  const handleUndo = async () => {
+    if (!deletedSignature) return;
+    
+    const sigToRestore = { ...deletedSignature };
+    if (!sigToRestore.isUnsaved) {
+      sigToRestore._id = `temp-${Date.now()}`;
+      sigToRestore.isUnsaved = true;
+      sigToRestore.isModified = false;
+    }
+    
+    setSignatures(prev => [...prev, sigToRestore]);
+    setDeletedSignature(null);
+    setSelectedSigId(sigToRestore._id);
   };
 
   const handleFinalize = async () => {
@@ -605,6 +688,13 @@ const Dashboard = () => {
                                      <Send className="w-4 h-4" />
                                    </button>
                                    <button 
+                                     onClick={() => setDocToDelete(doc)} 
+                                     className="p-2 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors tooltip-trigger"
+                                     title="Delete Document"
+                                   >
+                                     <Trash2 className="w-4 h-4" />
+                                   </button>
+                                   <button 
                                      onClick={() => openPreview(doc)} 
                                      className="px-3 py-1.5 bg-slate-900 text-white rounded-lg text-xs font-medium hover:bg-slate-800 transition-colors shadow-sm"
                                    >
@@ -702,6 +792,83 @@ const Dashboard = () => {
 
               {/* Modal Body */}
               <div className="flex-1 overflow-hidden bg-slate-100 relative flex flex-col">
+                {/* Placement Toolbar */}
+                {!previewError && !showAudit && selectedDoc && (
+                  <div className="bg-white border-b border-slate-200 px-6 py-3 flex flex-wrap gap-4 items-center justify-between shadow-sm z-10 shrink-0">
+                    <div className="flex flex-wrap items-center gap-3">
+                      <button 
+                        onClick={() => { setIsPlacementMode(true); setSelectedSigId(null); }}
+                        disabled={isPlacementMode}
+                        className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${isPlacementMode ? 'bg-primary text-white shadow-sm' : 'bg-slate-100 hover:bg-slate-200 text-slate-700'}`}
+                      >
+                        {isPlacementMode ? 'Click on PDF to Place' : 'Add Signature'}
+                      </button>
+                      <button 
+                        onClick={handleUndo}
+                        disabled={!deletedSignature}
+                        className="px-4 py-2 bg-slate-100 hover:bg-slate-200 disabled:opacity-50 disabled:hover:bg-slate-100 text-slate-700 rounded-lg text-sm font-medium transition-all"
+                      >
+                        Undo
+                      </button>
+                      <button 
+                        onClick={handleDelete}
+                        disabled={!selectedSigId}
+                        className="px-4 py-2 bg-rose-50 hover:bg-rose-100 disabled:opacity-50 disabled:hover:bg-rose-50 text-rose-600 rounded-lg text-sm font-medium transition-all"
+                      >
+                        Delete
+                      </button>
+                    </div>
+                    <div className="flex flex-wrap items-center gap-3">
+                      <button 
+                        onClick={() => {
+                          setSignatures(prev => prev.filter(s => !s.isUnsaved).map(s => s.isModified ? { ...s, x: s.originalX!, y: s.originalY!, isModified: false } : s));
+                          setIsPlacementMode(false);
+                          setSelectedSigId(null);
+                        }}
+                        disabled={!signatures.some(s => s.isUnsaved || s.isModified)}
+                        className="px-4 py-2 bg-slate-100 hover:bg-slate-200 disabled:opacity-50 disabled:hover:bg-slate-100 text-slate-700 rounded-lg text-sm font-medium transition-all"
+                      >
+                        Cancel Placement
+                      </button>
+                      <button 
+                        onClick={async () => {
+                          const sigsToSave = signatures.filter(s => s.isUnsaved || s.isModified);
+                          if (sigsToSave.length === 0) return;
+                          
+                          const toastId = toast.loading('Saving placement...');
+                          const token = localStorage.getItem('token') || '';
+                          for (const sig of sigsToSave) {
+                            if (sig.isUnsaved) {
+                              const res = await fetch('http://localhost:5000/api/signatures', {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+                                body: JSON.stringify({ fileId: sig.fileId, x: sig.x, y: sig.y, page: sig.page })
+                              });
+                              const data = await res.json();
+                              if (data.success) {
+                                setSignatures(prev => prev.map(s => s._id === sig._id ? data.signature : s));
+                              }
+                            } else if (sig.isModified) {
+                              await fetch('http://localhost:5000/api/signatures', {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+                                body: JSON.stringify({ id: sig._id, fileId: sig.fileId, x: sig.x, y: sig.y, page: sig.page })
+                              });
+                              setSignatures(prev => prev.map(s => s._id === sig._id ? { ...s, isModified: false } : s));
+                            }
+                          }
+                          setIsPlacementMode(false);
+                          setSelectedSigId(null);
+                          toast.success('Placement saved', { id: toastId });
+                        }}
+                        disabled={!signatures.some(s => s.isUnsaved || s.isModified)}
+                        className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 disabled:hover:bg-emerald-600 text-white rounded-lg text-sm font-medium shadow-sm transition-all flex items-center gap-2"
+                      >
+                        <CheckCircle2 className="w-4 h-4" /> Accept / Save
+                      </button>
+                    </div>
+                  </div>
+                )}
                 {showAudit ? (
                   <div className="flex-1 overflow-y-auto p-6 md:p-8">
                     <div className="max-w-4xl mx-auto bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
@@ -768,7 +935,7 @@ const Dashboard = () => {
                       }
                     >
                       <div 
-                        className="relative inline-block cursor-crosshair shadow-2xl bg-white ring-1 ring-black/5 transition-all mb-8" 
+                        className={`relative inline-block shadow-2xl bg-white ring-1 ring-black/5 transition-all mb-8 ${isPlacementMode ? 'cursor-crosshair' : 'cursor-default'}`} 
                         onClick={handlePdfClick}
                       >
                         <Page 
@@ -794,12 +961,15 @@ const Dashboard = () => {
                             >
                               <div 
                                 className={`border-2 flex flex-col items-center justify-center font-semibold px-4 py-3 rounded-xl w-full transition-all shadow-md backdrop-blur-sm ${
+                                  selectedSigId === sig._id ? 'ring-4 ring-primary/30 ' : ''
+                                }${
                                   isSigned ? 'border-emerald-500 bg-emerald-50/90 text-emerald-700' :
                                   isRejected ? 'border-rose-500 bg-rose-50/90 text-rose-700' :
                                   draggingSigId === sig._id ? 'border-primary bg-primary/10 text-primary shadow-xl shadow-primary/20 cursor-grabbing z-50' :
                                   'border-primary/60 bg-primary/5 text-primary cursor-grab hover:bg-primary/10 hover:border-primary border-dashed'
                                 }`}
-                                onPointerDown={isPending ? (e) => handlePointerDown(e, sig._id) : undefined}
+                                onClick={(e) => { e.stopPropagation(); setSelectedSigId(sig._id); }}
+                                onPointerDown={isPending ? (e) => handlePointerDown(e, sig) : undefined}
                                 onPointerMove={isPending ? handlePointerMove : undefined}
                                 onPointerUp={isPending ? handlePointerUp : undefined}
                               >
@@ -888,6 +1058,48 @@ const Dashboard = () => {
               </div>
             </motion.div>
           </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Delete Document Confirmation Modal */}
+      <AnimatePresence>
+        {docToDelete && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/50 backdrop-blur-sm p-4">
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="bg-white rounded-2xl shadow-xl w-full max-w-md overflow-hidden"
+            >
+              <div className="p-6">
+                <div className="flex items-center justify-center w-12 h-12 rounded-full bg-rose-100 mb-4 mx-auto">
+                  <Trash2 className="w-6 h-6 text-rose-600" />
+                </div>
+                <h3 className="text-lg font-bold text-slate-900 text-center mb-2">Delete Document</h3>
+                <p className="text-sm text-slate-500 text-center mb-6">
+                  Are you sure you want to delete <span className="font-semibold text-slate-700">{docToDelete.originalName}</span>? This action cannot be undone and will remove all associated signatures.
+                </p>
+                
+                <div className="flex gap-3">
+                  <button 
+                    onClick={() => setDocToDelete(null)}
+                    disabled={deletingDoc}
+                    className="flex-1 px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-sm font-medium transition-colors disabled:opacity-50"
+                  >
+                    Cancel
+                  </button>
+                  <button 
+                    onClick={confirmDeleteDocument}
+                    disabled={deletingDoc}
+                    className="flex-1 px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-sm font-medium transition-colors shadow-sm disabled:opacity-50 flex items-center justify-center gap-2"
+                  >
+                    {deletingDoc && <Loader2 className="w-4 h-4 animate-spin" />}
+                    {deletingDoc ? 'Deleting...' : 'Delete'}
+                  </button>
+                </div>
+              </div>
+            </motion.div>
+          </div>
         )}
       </AnimatePresence>
     </div>

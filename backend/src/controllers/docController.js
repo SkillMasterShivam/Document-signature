@@ -1,4 +1,7 @@
+import fs from 'fs';
+import path from 'path';
 import Document from '../models/Document.js';
+import Signature from '../models/Signature.js';
 import catchAsync from "../utils/catchAsync.js";
 
 // @desc    Upload a PDF document
@@ -55,5 +58,45 @@ export const getUserDocuments = catchAsync(async (req, res) => {
     page,
     pages: Math.ceil(total / limit),
     documents,
+  });
+});
+
+// @desc    Delete a document
+// @route   DELETE /api/docs/:id
+// @access  Private
+export const deleteDocument = catchAsync(async (req, res) => {
+  const document = await Document.findById(req.params.id);
+
+  if (!document) {
+    return res.status(404).json({
+      success: false,
+      message: 'Document not found',
+    });
+  }
+
+  // Make sure user owns the document
+  if (document.uploadedBy.toString() !== req.user._id.toString()) {
+    return res.status(403).json({
+      success: false,
+      message: 'Not authorized to delete this document',
+    });
+  }
+
+  // Delete the physical file
+  if (document.filePath) {
+    fs.unlink(document.filePath, (err) => {
+      if (err) console.error(`Error deleting file: ${document.filePath}`, err);
+    });
+  }
+
+  // Delete all signatures associated with this document
+  await Signature.deleteMany({ fileId: document._id });
+
+  // Delete the document record
+  await document.deleteOne();
+
+  return res.status(200).json({
+    success: true,
+    message: 'Document deleted successfully',
   });
 });
