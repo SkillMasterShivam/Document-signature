@@ -1,8 +1,4 @@
-import mongoose from "mongoose";
 import Audit from "../models/Audit.js";
-
-export const mockAudits = [];
-const isDbConnected = () => mongoose.connection.readyState === 1;
 
 export const auditLog = (action) => {
   return async (req, res, next) => {
@@ -27,28 +23,14 @@ export const auditLog = (action) => {
               const ipAddress = req.ip || req.connection?.remoteAddress || "unknown";
               const userAgent = req.get("User-Agent") || "unknown";
 
-              if (isDbConnected()) {
-                await Audit.create({
-                  documentId,
-                  userId,
-                  signerEmail,
-                  action,
-                  ipAddress,
-                  userAgent,
-                });
-              } else {
-                mockAudits.push({
-                  _id: new mongoose.Types.ObjectId().toString(),
-                  documentId,
-                  userId,
-                  signerEmail,
-                  action,
-                  ipAddress,
-                  userAgent,
-                  createdAt: new Date(),
-                  updatedAt: new Date(),
-                });
-              }
+              await Audit.create({
+                documentId,
+                userId,
+                signerEmail,
+                action,
+                ipAddress,
+                userAgent,
+              });
             }
           } catch (err) {
             console.error("Audit Logging Error:", err);

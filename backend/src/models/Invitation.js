@@ -6,10 +6,12 @@ const invitationSchema = new mongoose.Schema(
       type: mongoose.Schema.Types.ObjectId,
       ref: "Document",
       required: true,
+      index: true,
     },
     signerEmail: {
       type: String,
       required: true,
+      index: true,
     },
     token: {
       type: String,
@@ -24,6 +26,7 @@ const invitationSchema = new mongoose.Schema(
       type: String,
       enum: ["pending", "signed", "expired"],
       default: "pending",
+      index: true,
     },
   },
   { timestamps: true }
